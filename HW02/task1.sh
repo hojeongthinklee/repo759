@@ -5,7 +5,6 @@
 #SBATCH --error=task1_scaling.err
 #SBATCH --time=00:10:00
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=16G
 
 set -euo pipefail
 
