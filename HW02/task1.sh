@@ -1,4 +1,5 @@
 #!/bin/bash
+#SBATCH -p instruction
 #SBATCH --job-name=task1_scaling
 #SBATCH --output=task1_scaling.out
 #SBATCH --error=task1_scaling.err
