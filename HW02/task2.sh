@@ -17,4 +17,3 @@ m=7
 echo "Running: ./task2 ${n} ${m}"
 ./task2 "${n}" "${m}"
 
-echo "Done at $(date)"
