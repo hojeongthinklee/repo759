@@ -14,6 +14,5 @@ set -euo pipefail
 n=4096
 m=7
 
-echo "Running: ./task2 ${n} ${m}"
 ./task2 "${n}" "${m}"
 
