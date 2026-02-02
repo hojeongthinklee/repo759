@@ -1,0 +1,14 @@
+task1
+task2
+task3
+task4
+task5
+task6
+
+test_conv
+test_conv.cpp
+
+*.err
+*.out
+*.csv
+*.pdf

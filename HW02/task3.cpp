@@ -15,7 +15,7 @@ int main() {
     const std::size_t NN = N * N;
 
     std::mt19937 rng(12345);
-    std::uniform_real_distribution<double> dist(-1.0, 1.0);
+    std::uniform_real_distribution<double> dist(0.0, 1.0);
 
     double* A = new double[NN];
     double* B = new double[NN];
