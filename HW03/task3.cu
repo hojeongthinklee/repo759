@@ -31,7 +31,12 @@ int main(int argc, char** argv) {
     cudaMemcpy(dB, hB.data(), n *sizeof(float), cudaMemcpyHostToDevice);
 
     const int threads = 512;
-    const int blocks  = static_cast<int>((n + threads - 1) / threads);
+    // const int blocks  = static_cast<int>((n + threads - 1) / threads);
+    
+    if (argc >= 3) threads = std::atoi(argv[2]);
+    if (threads <= 0) return 1;
+
+    const int blocks = static_cast<int>((n + threads - 1) / threads);
 
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
