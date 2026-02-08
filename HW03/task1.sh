@@ -9,4 +9,9 @@
 
 set -euo pipefail
 
+module purge
+module load cuda
+
+nvcc task1.cu -O3 -std=c++17 -Xcompiler -Wall -Xptxas -O3 -o task1
+
 ./task1
