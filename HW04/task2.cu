@@ -71,7 +71,7 @@ int main(int argc, char** argv) {
                         sizeof(float),
                         cudaMemcpyDeviceToHost));
 
-  // Print last element then time (ms), matching assignment format
+  // Print last element then time (ms), matching assignment example format
   std::printf("%.2f\n", last);
   std::printf("%.2f\n", ms);
 

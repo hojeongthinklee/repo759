@@ -1,37 +1,113 @@
-#!/bin/bash
-#SBATCH -p instruction
-#SBATCH --job-name=hw04_task2
-#SBATCH --output=task2_%j.out
-#SBATCH --error=task2_%j.err
-#SBATCH --time=00:25:00
-#SBATCH --cpus-per-task=1
-#SBATCH --gres=gpu:1
+// stencil.cu
+#include "stencil.cuh"
+#include <cuda_runtime.h>
+#include <cstdio>
+#include <cstdlib>
 
-set -euo pipefail
+#define CUDA_CHECK(call)                                                     \
+  do {                                                                       \
+    cudaError_t err = (call);                                                \
+    if (err != cudaSuccess) {                                                \
+      fprintf(stderr, "CUDA error %s:%d: %s\n", __FILE__, __LINE__,          \
+              cudaGetErrorString(err));                                      \
+      std::exit(1);                                                          \
+    }                                                                        \
+  } while (0)
 
-module load nvidia/cuda/13.0.0
+// Computes 1D convolution:
+//   output[i] = sum_{j=-R..R} image[i+j] * mask[j+R]
+// Boundary condition:
+//   image[x] = 1 when x < 0 or x >= n
+//
+// Shared memory (dynamic only) stores:
+//  - Full mask (2R+1)
+//  - Image tile for the block including halo (blockDim.x + 2R)
+//  - Output values for the block (blockDim.x) before writing to global memory
+__global__ void stencil_kernel(const float* image,
+                               const float* mask,
+                               float* output,
+                               unsigned int n,
+                               unsigned int R) {
+  const unsigned int tid  = threadIdx.x;
+  const unsigned int bdim = blockDim.x;
+  const unsigned int gid  = blockIdx.x * bdim + tid;
 
-R=128
-TPB1=1024
-TPB2=512
+  const unsigned int mask_len = 2u * R + 1u;
+  const unsigned int tile_len = bdim + 2u * R;
 
-OUT1="task2_R${R}_tpb${TPB1}.csv"
-OUT2="task2_R${R}_tpb${TPB2}.csv"
+  // Dynamic shared memory layout:
+  // [0 .. mask_len-1]                         -> sh_mask
+  // [mask_len .. mask_len+tile_len-1]         -> sh_image (with halo)
+  // [mask_len+tile_len .. mask_len+tile_len+bdim-1] -> sh_out
+  extern __shared__ float sh[];
+  float* sh_mask  = sh;
+  float* sh_image = sh + mask_len;
+  float* sh_out   = sh + mask_len + tile_len;
 
-echo "n,time_ms" > "${OUT1}"
-echo "n,time_ms" > "${OUT2}"
+  // -------------------------
+  // Load full mask into shared memory
+  // -------------------------
+  for (unsigned int k = tid; k < mask_len; k += bdim) {
+    sh_mask[k] = mask[k];
+  }
 
-for p in $(seq 10 29); do
-  n=$((2**p))
+  // -------------------------
+  // Load image tile (including halo) into shared memory
+  // sh_image[k] corresponds to global index: (block_start + k - R)
+  // -------------------------
+  const long block_start = static_cast<long>(blockIdx.x) * static_cast<long>(bdim);
+  for (unsigned int k = tid; k < tile_len; k += bdim) {
+    const long g = block_start + static_cast<long>(k) - static_cast<long>(R);
+    if (g < 0 || g >= static_cast<long>(n)) {
+      sh_image[k] = 1.0f;  // boundary value
+    } else {
+      sh_image[k] = image[static_cast<unsigned int>(g)];
+    }
+  }
 
-  t1=$(./task2 "${n}" "${R}" "${TPB1}" | tail -n 1)
-  echo "${n},${t1}" >> "${OUT1}"
+  __syncthreads();
 
-  t2=$(./task2 "${n}" "${R}" "${TPB2}" | tail -n 1)
-  echo "${n},${t2}" >> "${OUT2}"
-done
+  // -------------------------
+  // Compute one output element per thread into shared memory first
+  // -------------------------
+  if (gid < n) {
+    float sum = 0.0f;
+    const unsigned int center = tid + R; // center index inside sh_image
 
-echo "Scaling experiment completed."
-echo "Generated files:"
-echo "  ${OUT1}"
-echo "  ${OUT2}"
+    for (int j = -static_cast<int>(R); j <= static_cast<int>(R); ++j) {
+      const unsigned int mj = static_cast<unsigned int>(j + static_cast<int>(R));
+      const unsigned int ij = static_cast<unsigned int>(static_cast<int>(center) + j);
+      sum += sh_image[ij] * sh_mask[mj];
+    }
+    sh_out[tid] = sum;
+  }
+
+  __syncthreads();
+
+  // -------------------------
+  // Write results from shared memory to global memory
+  // -------------------------
+  if (gid < n) {
+    output[gid] = sh_out[tid];
+  }
+}
+
+// Host wrapper: makes exactly one kernel launch
+__host__ void stencil(const float* image,
+                      const float* mask,
+                      float* output,
+                      unsigned int n,
+                      unsigned int R,
+                      unsigned int threads_per_block) {
+  const unsigned int blocks = (n + threads_per_block - 1u) / threads_per_block;
+
+  const unsigned int mask_len = 2u * R + 1u;
+  const unsigned int tile_len = threads_per_block + 2u * R;
+  const unsigned int out_len  = threads_per_block;
+
+  const size_t shmem_bytes =
+      static_cast<size_t>(mask_len + tile_len + out_len) * sizeof(float);
+
+  stencil_kernel<<<blocks, threads_per_block, shmem_bytes>>>(image, mask, output, n, R);
+  CUDA_CHECK(cudaGetLastError());
+}
