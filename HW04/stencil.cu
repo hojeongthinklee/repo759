@@ -28,7 +28,7 @@ __global__ void stencil_kernel(const float* image,
                                unsigned int n,
                                unsigned int R) {
   const unsigned int tid  = threadIdx.x;
-  const unsigned int bdim = blockDim.x;
+//   const unsigned int bdim = blockDim.x;
   const unsigned int gid  = blockIdx.x * bdim + tid;
 
   const unsigned int mask_len = 2u * R + 1u;
@@ -97,8 +97,9 @@ __host__ void stencil(const float* image,
   const unsigned int tile_len = threads_per_block + 2u * R;
   const unsigned int out_len  = threads_per_block;
 
-  const size_t shmem_bytes =
-      static_cast<size_t>(mask_len + tile_len + out_len) * sizeof(float);
+const size_t shmem_bytes =
+    static_cast<size_t>(mask_len + tile_len + threads_per_block) * sizeof(float);
+
 
   stencil_kernel<<<blocks, threads_per_block, shmem_bytes>>>(image, mask, output, n, R);
   CUDA_CHECK(cudaGetLastError());
