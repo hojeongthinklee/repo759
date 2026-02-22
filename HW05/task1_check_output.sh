@@ -13,5 +13,4 @@ set -euo pipefail
 N=1024
 BLOCK_DIM=32
 
-echo "Running: ./task1 ${N} ${BLOCK_DIM}"
 ./task1 ${N} ${BLOCK_DIM}
