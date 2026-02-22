@@ -12,3 +12,4 @@ test_conv.cpp
 *.out
 *.csv
 *.pdf
+*.png
