@@ -1,47 +1,45 @@
 #include <cuda_runtime.h>
 #include <iostream>
-#include <vector>
 #include <cstdlib>
 #include "matmul.cuh"
 
-// Fill A and B with small integer patterns that are safe for int
-// and produce similar results across int/float/double.
+// Fill A and B on the device with small values (0..9) to avoid int overflow.
+// This keeps int/float/double results in similar ranges.
 template <typename T>
-static void fill_matrices(std::vector<T>& A, std::vector<T>& B, unsigned int n) {
-    const size_t N = static_cast<size_t>(n) * static_cast<size_t>(n);
-    A.resize(N);
-    B.resize(N);
+__global__ void fill_AB_kernel(T* A, T* B, unsigned int n) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned long long N = (unsigned long long)n * (unsigned long long)n;
+    if ((unsigned long long)idx >= N) return;
 
-    for (unsigned int i = 0; i < n; ++i) {
-        for (unsigned int j = 0; j < n; ++j) {
-            int aval = (i + j) % 10;          // 0..9
-            int bval = (i * 3 + j * 7) % 10;  // 0..9
-            A[i * n + j] = static_cast<T>(aval);
-            B[i * n + j] = static_cast<T>(bval);
-        }
-    }
+    unsigned int i = idx / n;
+    unsigned int j = idx - i * n;
+
+    int aval = (int)((i + j) % 10);           // 0..9
+    int bval = (int)((i * 3u + j * 7u) % 10); // 0..9
+
+    A[idx] = (T)aval;
+    B[idx] = (T)bval;
 }
 
 template <typename T>
 static void run_case(void (*matmul_func)(const T*, const T*, T*, unsigned int, unsigned int),
-                     unsigned int n,
-                     unsigned int block_dim)
+                     unsigned int n, unsigned int block_dim)
 {
-    const size_t N = static_cast<size_t>(n) * static_cast<size_t>(n);
+    unsigned long long N = (unsigned long long)n * (unsigned long long)n;
 
-    std::vector<T> hA, hB, hC(N);
-
-    fill_matrices<T>(hA, hB, n);
-
+    // Allocate device matrices only (avoid huge host allocations)
     T *dA = nullptr, *dB = nullptr, *dC = nullptr;
-    cudaMalloc(&dA, N * sizeof(T));
-    cudaMalloc(&dB, N * sizeof(T));
-    cudaMalloc(&dC, N * sizeof(T));
+    cudaMalloc(&dA, (size_t)(N * sizeof(T)));
+    cudaMalloc(&dB, (size_t)(N * sizeof(T)));
+    cudaMalloc(&dC, (size_t)(N * sizeof(T)));
 
-    cudaMemcpy(dA, hA.data(), N * sizeof(T), cudaMemcpyHostToDevice);
-    cudaMemcpy(dB, hB.data(), N * sizeof(T), cudaMemcpyHostToDevice);
-    cudaMemset(dC, 0, N * sizeof(T));
+    // Fill A and B on device
+    const unsigned int TPB = 256;
+    unsigned int blocks = (unsigned int)((N + TPB - 1) / TPB);
+    fill_AB_kernel<T><<<blocks, TPB>>>(dA, dB, n);
+    cudaDeviceSynchronize();
 
+    // Time only the matmul call (matmul_* includes cudaDeviceSynchronize)
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
@@ -54,17 +52,22 @@ static void run_case(void (*matmul_func)(const T*, const T*, T*, unsigned int, u
     float ms = 0.0f;
     cudaEventElapsedTime(&ms, start, stop);
 
-    cudaMemcpy(hC.data(), dC, N * sizeof(T), cudaMemcpyDeviceToHost);
+    // Copy back only C[0] and C[last] (avoid huge D2H copy)
+    T first = 0;
+    T last  = 0;
+    cudaMemcpy(&first, dC, sizeof(T), cudaMemcpyDeviceToHost);
+    cudaMemcpy(&last,  dC + (N - 1), sizeof(T), cudaMemcpyDeviceToHost);
 
-    std::cout << hC[0] << "\n";
-    std::cout << hC[N - 1] << "\n";
-    std::cout << ms << "\n";
+    // Required output: first element, last element, time (ms)
+    std::cout << first << "\n";
+    std::cout << last  << "\n";
+    std::cout << ms    << "\n";
 
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
     cudaFree(dA);
     cudaFree(dB);
     cudaFree(dC);
-    cudaEventDestroy(start);
-    cudaEventDestroy(stop);
 }
 
 int main(int argc, char** argv)
