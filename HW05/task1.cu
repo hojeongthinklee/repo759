@@ -4,42 +4,43 @@
 #include <cstdlib>
 #include "matmul.cuh"
 
-// Safe fill for float/double
+// Fill A and B with small integer patterns that are safe for int
+// and produce similar results across int/float/double.
 template <typename T>
-static void fill_matrix(std::vector<T>& M, unsigned int n) {
-    for (unsigned int i = 0; i < n; ++i)
-        for (unsigned int j = 0; j < n; ++j)
-            M[i * n + j] =
-                static_cast<T>((i % 7) * 0.1 + (j % 11) * 0.01);
+static void fill_matrices(std::vector<T>& A, std::vector<T>& B, unsigned int n) {
+    const size_t N = static_cast<size_t>(n) * static_cast<size_t>(n);
+    A.resize(N);
+    B.resize(N);
+
+    for (unsigned int i = 0; i < n; ++i) {
+        for (unsigned int j = 0; j < n; ++j) {
+            int aval = (i + j) % 10;          // 0..9
+            int bval = (i * 3 + j * 7) % 10;  // 0..9
+            A[i * n + j] = static_cast<T>(aval);
+            B[i * n + j] = static_cast<T>(bval);
+        }
+    }
 }
 
-// Safe fill for int (no overflow)
-template <>
-void fill_matrix<int>(std::vector<int>& M, unsigned int /*n*/) {
-    for (size_t i = 0; i < M.size(); ++i)
-        M[i] = 1;
-}
-
 template <typename T>
-static void run_case(
-    void (*matmul_func)(const T*, const T*, T*, unsigned int, unsigned int),
-    unsigned int n,
-    unsigned int block_dim)
+static void run_case(void (*matmul_func)(const T*, const T*, T*, unsigned int, unsigned int),
+                     unsigned int n,
+                     unsigned int block_dim)
 {
-    const size_t N = static_cast<size_t>(n) * n;
+    const size_t N = static_cast<size_t>(n) * static_cast<size_t>(n);
 
-    std::vector<T> hA(N), hB(N), hC(N);
+    std::vector<T> hA, hB, hC(N);
 
-    fill_matrix<T>(hA, n);
-    fill_matrix<T>(hB, n);
+    fill_matrices<T>(hA, hB, n);
 
-    T *dA, *dB, *dC;
+    T *dA = nullptr, *dB = nullptr, *dC = nullptr;
     cudaMalloc(&dA, N * sizeof(T));
     cudaMalloc(&dB, N * sizeof(T));
     cudaMalloc(&dC, N * sizeof(T));
 
     cudaMemcpy(dA, hA.data(), N * sizeof(T), cudaMemcpyHostToDevice);
     cudaMemcpy(dB, hB.data(), N * sizeof(T), cudaMemcpyHostToDevice);
+    cudaMemset(dC, 0, N * sizeof(T));
 
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
@@ -50,7 +51,7 @@ static void run_case(
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
 
-    float ms;
+    float ms = 0.0f;
     cudaEventElapsedTime(&ms, start, stop);
 
     cudaMemcpy(hC.data(), dC, N * sizeof(T), cudaMemcpyDeviceToHost);
