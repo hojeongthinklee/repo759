@@ -1,85 +1,63 @@
-// task1.cu
 #include <cuda_runtime.h>
 #include <iostream>
 #include <vector>
 #include <cstdlib>
 #include "matmul.cuh"
 
-// CUDA error checking
-static inline void cuda_check(cudaError_t err, const char* msg) {
-    if (err != cudaSuccess) {
-        std::cerr << "CUDA error (" << msg << "): "
-                  << cudaGetErrorString(err) << std::endl;
-        std::exit(EXIT_FAILURE);
-    }
-}
-
-// Fill matrix (float/double)
+// Safe fill for float/double
 template <typename T>
-void fill_matrix(std::vector<T>& M, unsigned int n) {
+static void fill_matrix(std::vector<T>& M, unsigned int n) {
     for (unsigned int i = 0; i < n; ++i)
         for (unsigned int j = 0; j < n; ++j)
             M[i * n + j] =
-                static_cast<T>((i + 1) * 0.01 + (j + 2) * 0.02);
+                static_cast<T>((i % 7) * 0.1 + (j % 11) * 0.01);
 }
 
-// Specialized fill for int
+// Safe fill for int (no overflow)
 template <>
-void fill_matrix<int>(std::vector<int>& M, unsigned int n) {
-    for (unsigned int i = 0; i < n; ++i)
-        for (unsigned int j = 0; j < n; ++j)
-            M[i * n + j] =
-                static_cast<int>((i + 1) + (j + 2));
+void fill_matrix<int>(std::vector<int>& M, unsigned int /*n*/) {
+    for (size_t i = 0; i < M.size(); ++i)
+        M[i] = 1;
 }
 
-// Run one matmul variant
 template <typename T>
-void run_case(void (*matmul_func)(
-                  const T*, const T*, T*,
-                  unsigned int, unsigned int),
-              unsigned int n,
-              unsigned int block_dim)
+static void run_case(
+    void (*matmul_func)(const T*, const T*, T*, unsigned int, unsigned int),
+    unsigned int n,
+    unsigned int block_dim)
 {
-    size_t N = static_cast<size_t>(n) * n;
+    const size_t N = static_cast<size_t>(n) * n;
 
-    std::vector<T> hA(N), hB(N), hC(N, 0);
+    std::vector<T> hA(N), hB(N), hC(N);
 
     fill_matrix<T>(hA, n);
     fill_matrix<T>(hB, n);
 
     T *dA, *dB, *dC;
-    cuda_check(cudaMalloc(&dA, N*sizeof(T)), "Malloc dA");
-    cuda_check(cudaMalloc(&dB, N*sizeof(T)), "Malloc dB");
-    cuda_check(cudaMalloc(&dC, N*sizeof(T)), "Malloc dC");
+    cudaMalloc(&dA, N * sizeof(T));
+    cudaMalloc(&dB, N * sizeof(T));
+    cudaMalloc(&dC, N * sizeof(T));
 
-    cuda_check(cudaMemcpy(dA, hA.data(),
-               N*sizeof(T), cudaMemcpyHostToDevice),
-               "Memcpy A");
-    cuda_check(cudaMemcpy(dB, hB.data(),
-               N*sizeof(T), cudaMemcpyHostToDevice),
-               "Memcpy B");
+    cudaMemcpy(dA, hA.data(), N * sizeof(T), cudaMemcpyHostToDevice);
+    cudaMemcpy(dB, hB.data(), N * sizeof(T), cudaMemcpyHostToDevice);
 
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
 
     cudaEventRecord(start);
-
     matmul_func(dA, dB, dC, n, block_dim);
-
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
 
     float ms;
     cudaEventElapsedTime(&ms, start, stop);
 
-    cudaMemcpy(hC.data(), dC,
-               N*sizeof(T), cudaMemcpyDeviceToHost);
+    cudaMemcpy(hC.data(), dC, N * sizeof(T), cudaMemcpyDeviceToHost);
 
-    // Required output format:
-    std::cout << hC[0] << std::endl;
-    std::cout << hC[N-1] << std::endl;
-    std::cout << ms << std::endl;
+    std::cout << hC[0] << "\n";
+    std::cout << hC[N - 1] << "\n";
+    std::cout << ms << "\n";
 
     cudaFree(dA);
     cudaFree(dB);
@@ -90,15 +68,8 @@ void run_case(void (*matmul_func)(
 
 int main(int argc, char** argv)
 {
-    if (argc < 3) {
-        std::cerr << "Usage: ./task1 n block_dim\n";
-        return 1;
-    }
-
-    unsigned int n =
-        static_cast<unsigned int>(std::atoi(argv[1]));
-    unsigned int block_dim =
-        static_cast<unsigned int>(std::atoi(argv[2]));
+    unsigned int n = std::strtoul(argv[1], nullptr, 10);
+    unsigned int block_dim = std::strtoul(argv[2], nullptr, 10);
 
     run_case<int>(matmul_1, n, block_dim);
     run_case<float>(matmul_2, n, block_dim);

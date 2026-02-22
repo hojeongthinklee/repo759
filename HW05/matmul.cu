@@ -1,101 +1,76 @@
-// matmul.cu
 #include <cuda_runtime.h>
-#include <cstdio>
 #include <cstdlib>
 #include "matmul.cuh"
 
-// Simple CUDA error checking
-static inline void cuda_check(cudaError_t err, const char* msg) {
-    if (err != cudaSuccess) {
-        std::fprintf(stderr, "CUDA error (%s): %s\n",
-                     msg, cudaGetErrorString(err));
-        std::exit(EXIT_FAILURE);
-    }
-}
-
-// Tiled matrix multiplication kernel using shared memory
 template <typename T>
 __global__ void matmul_kernel(const T* A,
                               const T* B,
                               T* C,
-                              unsigned int n,
-                              unsigned int block_dim)
+                              unsigned int n)
 {
-    // Block and thread indices
-    int bx = blockIdx.x;
-    int by = blockIdx.y;
-    int tx = threadIdx.x;
-    int ty = threadIdx.y;
+    const unsigned int bd = blockDim.x;
 
-    // Allocate dynamic shared memory
-    extern __shared__ unsigned char shared_raw[];
-    T* As = reinterpret_cast<T*>(shared_raw);
-    T* Bs = As + block_dim * block_dim;
+    const unsigned int tx = threadIdx.x;
+    const unsigned int ty = threadIdx.y;
 
-    // Global row and column of C this thread computes
-    int row = by * block_dim + ty;
-    int col = bx * block_dim + tx;
+    const unsigned int row = blockIdx.y * bd + ty;
+    const unsigned int col = blockIdx.x * bd + tx;
 
-    T Cvalue = 0;
+    extern __shared__ unsigned char sh_raw[];
+    T* As = reinterpret_cast<T*>(sh_raw);
+    T* Bs = As + bd * bd;
 
-    // Number of tiles
-    int numTiles = (n + block_dim - 1) / block_dim;
+    T acc = static_cast<T>(0);
 
-    for (int t = 0; t < numTiles; ++t) {
+    const unsigned int numTiles = (n + bd - 1) / bd;
 
-        int tiledColA = t * block_dim + tx;
-        int tiledRowB = t * block_dim + ty;
+    for (unsigned int t = 0; t < numTiles; ++t) {
 
-        // Load A tile
-        if (row < (int)n && tiledColA < (int)n)
-            As[ty * block_dim + tx] = A[row * n + tiledColA];
+        const unsigned int a_col = t * bd + tx;
+        const unsigned int b_row = t * bd + ty;
+
+        if (row < n && a_col < n)
+            As[ty * bd + tx] = A[row * n + a_col];
         else
-            As[ty * block_dim + tx] = 0;
+            As[ty * bd + tx] = static_cast<T>(0);
 
-        // Load B tile
-        if (tiledRowB < (int)n && col < (int)n)
-            Bs[ty * block_dim + tx] = B[tiledRowB * n + col];
+        if (b_row < n && col < n)
+            Bs[ty * bd + tx] = B[b_row * n + col];
         else
-            Bs[ty * block_dim + tx] = 0;
+            Bs[ty * bd + tx] = static_cast<T>(0);
 
         __syncthreads();
 
-        // Compute partial product for this tile
-        for (unsigned int k = 0; k < block_dim; ++k)
-            Cvalue += As[ty * block_dim + k] *
-                      Bs[k * block_dim + tx];
+        for (unsigned int k = 0; k < bd; ++k)
+            acc += As[ty * bd + k] * Bs[k * bd + tx];
 
         __syncthreads();
     }
 
-    // Write result
-    if (row < (int)n && col < (int)n)
-        C[row * n + col] = Cvalue;
+    if (row < n && col < n)
+        C[row * n + col] = acc;
 }
 
-// Kernel launcher wrapper
 template <typename T>
-void launch_matmul(const T* A,
-                   const T* B,
-                   T* C,
-                   unsigned int n,
-                   unsigned int block_dim)
+static void launch_matmul(const T* A,
+                          const T* B,
+                          T* C,
+                          unsigned int n,
+                          unsigned int block_dim)
 {
     dim3 block(block_dim, block_dim);
     dim3 grid((n + block_dim - 1) / block_dim,
               (n + block_dim - 1) / block_dim);
 
-    size_t shared_bytes =
+    size_t shmem_bytes =
         2ull * block_dim * block_dim * sizeof(T);
 
-    matmul_kernel<T><<<grid, block, shared_bytes>>>(
-        A, B, C, n, block_dim);
+    matmul_kernel<T><<<grid, block, shmem_bytes>>>(
+        A, B, C, n);
 
-    cuda_check(cudaGetLastError(), "Kernel launch");
-    cuda_check(cudaDeviceSynchronize(), "Device sync");
+    cudaDeviceSynchronize();
 }
 
-// Required host wrappers
 __host__ void matmul_1(const int* A,
                        const int* B,
                        int* C,
