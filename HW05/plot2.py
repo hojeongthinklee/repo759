@@ -23,5 +23,5 @@ plt.legend()
 plt.grid(True, which="both", linestyle="--", linewidth=0.5)
 
 plt.tight_layout()
-plt.savefig("task2_scaling_plot.png", dpi=300)
+plt.savefig("task2_scaling_plot_warmup.png", dpi=300)
 # plt.show()
