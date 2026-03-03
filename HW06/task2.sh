@@ -14,6 +14,8 @@ echo "n,time_ms" > "${OUT}"
 
 TPB=1024
 
+./task2 1024 1024 > /dev/null
+
 for p in $(seq 10 16); do
   n=$((2**p))
 
