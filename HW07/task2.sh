@@ -16,7 +16,11 @@ echo "n,time_ms" > $OUT
 for p in $(seq 10 20); do
     n=$((2**p))
 
+    echo "Running n=$n"
+
+    ./task2 $n
+
     time_ms=$(./task2 $n | tail -n 1)
 
-    echo "$n,$time_ms" >> $OUT
+    echo "$n,$time_ms" >> task2.csv
 done
