@@ -1,6 +1,7 @@
 #include <omp.h>
 
 #include <iostream>
+#include <sstream>
 
 long long factorial(int n) {
     long long result = 1;
@@ -21,11 +22,20 @@ int main() {
             std::cout << "Number of threads: " << nthreads << '\n';
         }
 
-        std::cout << "I am thread No. " << tid << '\n';
+        {
+            std::ostringstream oss;
+            oss << "I am thread No. " << tid << '\n';
+            #pragma omp critical
+            std::cout << oss.str();
+        }
 
         #pragma omp for
         for (int i = 1; i <= 8; ++i) {
-            std::cout << i << "!=" << factorial(i) << '\n';
+            long long f = factorial(i);
+            std::ostringstream oss;
+            oss << i << "!=" << f << '\n';
+            #pragma omp critical
+            std::cout << oss.str();
         }
     }
 
