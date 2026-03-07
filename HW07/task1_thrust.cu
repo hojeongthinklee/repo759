@@ -2,61 +2,55 @@
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
 #include <thrust/reduce.h>
+#include <thrust/functional.h>
 
-#include <cstdlib>
-#include <iomanip>
 #include <iostream>
 #include <random>
+#include <cstdlib>
 
-#define CUDA_CHECK(call)                                                         \
-  do {                                                                           \
-    cudaError_t err__ = (call);                                                  \
-    if (err__ != cudaSuccess) {                                                  \
-      std::cerr << "CUDA error at " << __FILE__ << ":" << __LINE__ << " -> " \
-                << cudaGetErrorString(err__) << std::endl;                       \
-      std::exit(EXIT_FAILURE);                                                   \
-    }                                                                            \
-  } while (0)
+int main(int argc, char* argv[]) {
 
-int main(int argc, char** argv) {
-  if (argc != 2) {
-    std::cerr << "Usage: " << argv[0] << " n\n";
-    return EXIT_FAILURE;
-  }
+    if (argc != 2) {
+        std::cerr << "Usage: ./task1_thrust n\n";
+        return 1;
+    }
 
-  const size_t n = std::strtoull(argv[1], nullptr, 10);
-  if (n == 0) {
-    std::cerr << "n must be a positive integer\n";
-    return EXIT_FAILURE;
-  }
+    int n = atoi(argv[1]);
 
-  thrust::host_vector<float> h_vec(n);
-  std::mt19937 rng(12345);
-  std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
-  for (size_t i = 0; i < n; ++i) {
-    h_vec[i] = dist(rng);
-  }
+    std::mt19937 rng(1234);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
 
-  thrust::device_vector<float> d_vec = h_vec;
+    thrust::host_vector<float> h(n);
 
-  cudaEvent_t start, stop;
-  CUDA_CHECK(cudaEventCreate(&start));
-  CUDA_CHECK(cudaEventCreate(&stop));
+    for (int i = 0; i < n; i++)
+        h[i] = dist(rng);
 
-  CUDA_CHECK(cudaEventRecord(start));
-  float result = thrust::reduce(d_vec.begin(), d_vec.end(), 0.0f,
-                                thrust::plus<float>());
-  CUDA_CHECK(cudaEventRecord(stop));
-  CUDA_CHECK(cudaEventSynchronize(stop));
+    thrust::device_vector<float> d = h;
 
-  float elapsed_ms = 0.0f;
-  CUDA_CHECK(cudaEventElapsedTime(&elapsed_ms, start, stop));
+    // -------- warmup --------
+    thrust::reduce(d.begin(), d.end(), 0.0f, thrust::plus<float>());
+    cudaDeviceSynchronize();
+    // ------------------------
 
-  std::cout << std::setprecision(10) << result << '\n';
-  std::cout << std::fixed << std::setprecision(6) << elapsed_ms << '\n';
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
 
-  CUDA_CHECK(cudaEventDestroy(start));
-  CUDA_CHECK(cudaEventDestroy(stop));
+    cudaEventRecord(start);
 
-  return 0;
+    float sum = thrust::reduce(d.begin(), d.end(), 0.0f, thrust::plus<float>());
+
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+
+    float ms;
+    cudaEventElapsedTime(&ms, start, stop);
+
+    std::cout << sum << std::endl;
+    std::cout << ms << std::endl;
+
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
+
+    return 0;
 }
